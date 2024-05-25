@@ -1,4 +1,4 @@
-CREATE TABLE articles (
+CREATE TABLE news_articles (
     id SERIAL PRIMARY KEY,
     image_url TEXT,
     time_publish VARCHAR(50),
