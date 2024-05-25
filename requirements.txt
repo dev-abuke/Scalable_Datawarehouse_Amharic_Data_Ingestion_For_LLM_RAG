@@ -4,11 +4,6 @@ pandas
 sqlalchemy
 psycopg2
 langdetect
-
-
-
-#backend requirements 
 fastapi
-sqlalchemy
 python-dotenv
 
