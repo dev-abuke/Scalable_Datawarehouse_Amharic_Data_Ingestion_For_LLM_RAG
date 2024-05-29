@@ -1,5 +1,8 @@
+from typing import List
 from enum import Enum
 import re
+import logging
+import pandas as pd
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
@@ -17,13 +20,25 @@ class AlainNewsCategory(Enum):
 class AlainNewsButton(Enum):
     LOADING = "ተጨማሪ ጫን"
     NEXT_PAGE = 'next page'
+    
+logging.basicConfig(
+    filename='scraper.log', # Log file location
+    level=logging.INFO, # Log level
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s' # Log format
+    # handlers=[
+    #     logging.StreamHandler() # StreamHandler to output to console
+    # ]
+)
+
+logger = logging.getLogger(__name__)
 
 class AlainNewsScraper:
     def __init__(
         self, 
         url: str = 'https://am.al-ain.com/', 
         headless: bool = True, 
-        number_of_pages_to_scrape: int = 1
+        number_of_pages_to_scrape: int = 10,
+        os: str = "linux"
     ) -> None:
         """
         Initialize the AlainNewsScraper object
@@ -39,14 +54,21 @@ class AlainNewsScraper:
         options = webdriver.ChromeOptions()
         if headless:
             options.add_argument("--headless")
-        self.driver = webdriver.Chrome(
-            options=options, 
-            service=Service(ChromeDriverManager().install())
-        )
+        if os != "windows":
+            logger.info("Os is not windows")
+            options.binary_location = "/usr/bin/chromium-browser" 
+            service = Service('/usr/bin/chromedriver')  # Path to Chromedriver
+            self.driver = webdriver.Chrome(service=service, options=options)
+        else:
+            self.driver = webdriver.Chrome(
+                options=options, 
+                service=Service(ChromeDriverManager().install())
+            )
         # Store the URL of the website we're scraping and the number of
         # pages of articles to scrape
         self.url = url
         self.number_of_pages_to_scrape = number_of_pages_to_scrape
+        logger.info("AlainNewsScraper initialized")
 
     def scroll_to_bottom(self) -> None:
         """
@@ -68,6 +90,7 @@ class AlainNewsScraper:
         except WebDriverException as e:
             print("WebDriverException error occurred while scrolling to the bottom of the page:", e)
             raise
+        logger.info("Scrolled to the bottom of the page")
 
     def initialize_driver(self, category: AlainNewsCategory) -> None:
         """
@@ -89,8 +112,9 @@ class AlainNewsScraper:
         except WebDriverException as e:
             print("WebDriverException error occurred while navigating to the category page:", e)
             raise
+        logger.info(f"Navigated to category page: {category_page_url}")
 
-    def get_all_articles_on_page_by_category(self) -> list[WebElement]:
+    def get_all_articles_on_page_by_category(self) -> List[WebElement]:
         """
         Retrieves all the articles on the current page for a given category.
 
@@ -123,16 +147,20 @@ class AlainNewsScraper:
             except WebDriverException as e:
                 print("WebDriverException error occurred while waiting for the next page element to load:", e)
                 raise
+            logger.info("Waiting for the next page element to load...")
+        
+        logger.info("Retrieved next page element")
 
         # Return the articles element
         try:
+            logger.info("Retrieved articles element")
             return self.get_articles_element()
         except WebDriverException as e:
             print("WebDriverException error occurred while retrieving the article elements:", e)
             raise
 
 
-    def get_articles_element(self) -> list[WebElement]:
+    def get_articles_element(self) -> List[WebElement]:
         try:
             row_element = self.driver.find_element(By.XPATH, '//div[@class="row loadmore"]')
             articles = row_element.find_elements(By.TAG_NAME, 'article')
@@ -156,9 +184,11 @@ class AlainNewsScraper:
             image_element = article.find_element(By.TAG_NAME, 'img')
             image_url = image_element.get_attribute('srcset')
             image_url = re.sub(r'\s\d+w', '', image_url).split(',')[0]
+            logger.info(f"Retrieved image url: {image_url}")
             return image_url.strip()
         except WebDriverException as e:
             print("WebDriverException error occurred while retrieving the image url of the article:", e)
+            log.error("Failed to retrieve image url :: ", e)
             return ""
 
     def get_title(self, article: WebElement) -> str:
@@ -193,7 +223,7 @@ class AlainNewsScraper:
             print("WebDriverException error occurred while retrieving the time publish of the article:", e)
             return ""
 
-    def get_news(self) -> list[dict]:
+    def get_news(self) -> List[dict]:
         """
         Retrieves news articles from various categories using web scraping.
 
@@ -216,10 +246,12 @@ class AlainNewsScraper:
         news = []  # List to store all the news articles
         for category in AlainNewsCategory:  # Iterate through all categories
             self.initialize_driver(category)  # Initialize the web driver for the given category
+            logger.info(f"Initialized driver for category {category.value}")
             pages_to_scrape = self.number_of_pages_to_scrape  # Get the number of pages to scrape for the given category
             while pages_to_scrape > 0:  # While there are still pages to scrape
                 pages_to_scrape -= 1  # Decrement the number of pages to scrape
                 articles = self.get_all_articles_on_page_by_category()  # Get all the articles on the current page
+                logger.info(f"Retrieved articles on page {pages_to_scrape + 1} of category {category.value}")
                 if not articles:  # If there are no articles on the current page
                     print(f"No articles found on page {pages_to_scrape + 1} of category {category.value}")  # Print an error message
                 else:  # If there are articles on the current page
@@ -245,7 +277,7 @@ class AlainNewsScraper:
         return news  # Return the list of news articles
 
 
-    def get_full_news(self) -> list[dict]:
+    def get_full_news(self) -> List[dict]:
         """
         Retrieves all the news articles and their corresponding content.
 
@@ -266,6 +298,7 @@ class AlainNewsScraper:
         """
         news = self.get_news()
         for n in news:
+            logger.info(f"Scraping content page of category {n.get('category')} and url {n.get('article_url')}")
             # print("The article on page of category {} is: {}".format(n.get('category'), n.get('article_url')))
             try:
                 # Navigate to the content page of the article
@@ -287,7 +320,7 @@ class AlainNewsScraper:
                 n["detail_content"] = detail_content
 
             except (WebDriverException, AttributeError, Exception) as e:
-                print(f"An error occurred while scraping content page of category {n.get('category')} and url {n.get('article_url')}:: {e}")
+                log.error(f"An error occurred while scraping content page of category {n.get('category')} and url {n.get('article_url')}:: {e}")
         return news
 
 
@@ -304,3 +337,9 @@ class AlainNewsScraper:
         finished using it to free up system resources
         """
         self.driver.quit()
+
+if __name__ == "__main__":
+    scraper = AlainNewsScraper()
+    news_df = pd.DataFrame(scraper.get_full_news())
+    news_df.to_csv('./data/alain_news_class.csv', index=True, index_label='id')
+    scraper.quit_driver()
